@@ -1,0 +1,96 @@
+sudo apt install gedit
+sudo apt install unzip
+
+# packer
+export VER="1.6.4"
+wget https://releases.hashicorp.com/packer/${VER}/packer_${VER}_linux_amd64.zip
+unzip packer_${VER}_linux_amd64.zip
+sudo mv packer /usr/local/bin
+packer version
+
+# gcp sdk
+echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | sudo tee -a /etc/apt/sources.list.d/google-cloud-sdk.list
+curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key --keyring /usr/share/keyrings/cloud.google.gpg add -
+sudo apt update
+sudo apt-get install google-cloud-sdk
+gcloud init
+gcloud auth login
+gcloud auth application-default login
+
+# create and config project
+gcloud projects create sysadmin-work-test-292709
+gcloud config set project sysadmin-work-test-292709
+gcloud beta billing projects link sysadmin-work-test-292709 --billing-account=01C1BB-E79B32-6387A2  
+
+# enable services
+gcloud services enable sourcerepo.googleapis.com --project sysadmin-work-test-292709
+gcloud services enable cloudapis.googleapis.com --project sysadmin-work-test-292709
+gcloud services enable compute.googleapis.com --project sysadmin-work-test-292709
+gcloud services enable servicemanagement.googleapis.com --project sysadmin-work-test-292709
+gcloud services enable storage-api.googleapis.com --project sysadmin-work-test-292709
+gcloud services enable cloudbuild.googleapis.com --project sysadmin-work-test-292709
+gcloud services enable cloudresourcemanager.googleapis.com --project=sysadmin-work-test-292709
+gcloud services enable compute.googleapis.com --project sysadmin-work-test-292709
+gcloud services enable containerregistry.googleapis.com --project sysadmin-work-test-292709
+gcloud services enable admin.googleapis.com appengine.googleapis.com caldav.googleapis.com cloudapis.googleapis.com calendar-json.googleapis.com chat.googleapis.com classroom.googleapis.com compute.googleapis.com contacts.googleapis.com docs.googleapis.com drive.googleapis.com gmail.googleapis.com groupssettings.googleapis.com iam.googleapis.com iamcredentials.googleapis.com people.googleapis.com sheets.googleapis.com slides.googleapis.com --project sysadmin-work-test-292709
+
+# create accounts
+gcloud iam service-accounts create packer \
+  --project sysadmin-work-test-292709 \
+  --description="Packer Service Account" \
+  --display-name="Packer Service Account"
+
+gcloud projects add-iam-policy-binding sysadmin-work-test-292709 \
+    --member=serviceAccount:packer@sysadmin-work-test-292709.iam.gserviceaccount.com \
+    --role=roles/compute.instanceAdmin.v1
+
+gcloud projects add-iam-policy-binding sysadmin-work-test-292709 \
+    --member=serviceAccount:packer@sysadmin-work-test-292709.iam.gserviceaccount.com \
+    --role=roles/iam.serviceAccountUser
+    
+CLOUD_BUILD_ACCOUNT=$(gcloud projects get-iam-policy sysadmin-work-test-292709 --filter="(bindings.role:roles/cloudbuild.builds.builder)"  --flatten="bindings[].members" --format="value(bindings.members[])")
+
+gcloud projects add-iam-policy-binding sysadmin-work-test-292709 \
+  --member $CLOUD_BUILD_ACCOUNT \
+  --role roles/editor
+  
+# exports
+export PROJECT_ID=sysadmin-work-test-292709
+export _IMAGE_ZONE=us-east1-b
+export _IMAGE_FAMILY=ubuntu-1804-lts
+
+# build a VM
+mkdir sysadmin-image-factory
+cd sysadmin-image-factory
+curl -L https://github.com/GoogleCloudPlatform/community/raw/master/tutorials/create-cloud-build-image-factory-using-packer/cloudbuild.yaml >cloudbuild.yaml
+curl -L https://github.com/GoogleCloudPlatform/community/raw/master/tutorials/create-cloud-build-image-factory-using-packer/install-website.sh >install-website.sh 
+git init
+gcloud source repos create sysadmin-image-factory
+project_dir=$(pwd)
+cd /tmp
+git clone https://github.com/GoogleCloudPlatform/cloud-builders-community.git
+cd cloud-builders-community/packer
+gcloud builds submit --config cloudbuild.yaml
+rm -rf /tmp/cloud-builders-community
+cd $project_dir
+gcloud compute images list | awk '{print $3}'  | awk '!a[$0]++'
+git remote add google  https://source.developers.google.com/p/sysadmin-work-test-292709/r/sysadmin-image-factory 
+gcloud compute instances create sysadmin-from-factory --image https://www.googleapis.com/compute/v1/projects/sysadmin-work-test-292709/global/images/packer-1602916033 --tags=http-server --zone=us-east1-b
+gcloud compute firewall-rules create http --allow=tcp:80 --target-tags=http-server --source-ranges=0.0.0.0/0
+gcloud compute instances list --filter="name:sysadmin*" --format="value(networkInterfaces[0].accessConfigs[0].natIP)"
+
+# delete a VM
+gcloud compute firewall-rules delete --quiet http
+gcloud compute instances delete --quiet sysadmin-from-factory
+gcloud compute images delete packer-1602916033
+
+# terraform
+wget https://releases.hashicorp.com/terraform/0.13.4/terraform_0.13.4_linux_amd64.zip
+unzip terraform_0.13.4_linux_amd64.zip
+sudo mv terraform /usr/local/bin/
+terraform --version 
+
+terraform init
+terraform apply -auto-approve
+terraform destroy -auto-approve
+
