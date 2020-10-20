@@ -59,6 +59,9 @@ export PROJECT_ID=sysadmin-work-test-292709
 export _IMAGE_ZONE=us-east1-b
 export _IMAGE_FAMILY=ubuntu-1804-lts
 
+# build with additional info
+PACKER_LOG=1 packer build ubuntu-1804-lts
+
 # build a VM
 mkdir sysadmin-image-factory
 cd sysadmin-image-factory
